@@ -1,61 +1,31 @@
 <?php
-require_once __DIR__ . '/../config/db.php';
-require_once __DIR__ . '/../models/Pelicula.php';
-require_once __DIR__ . '/../models/Funding.php';
-require_once __DIR__ . '/../models/Sesion.php';
-
 class PeliculaRepository {
+    private $pdo;
+    public function __construct($pdo) { $this->pdo = $pdo; }
 
-    public function insertar(Pelicula $p) {
-        global $pdo;
-        $stmt = $pdo->prepare("INSERT INTO Peliculas 
-            (id_director, titulo, tipo_proyeccion, sinopsis, poster, anio, estado_peticion) 
-            VALUES (?, ?, NULL, ?, ?, ?, 'pendiente')");
-        
-        $stmt->execute([
-            $p->id_director,
-            $p->titulo,
-            $p->sinopsis,
-            $p->poster,
-            $p->anio
-        ]);
-        return $pdo->lastInsertId();
+    public function registrar($id_director, $titulo, $sinopsis, $poster, $anio) {
+        $sql = "INSERT INTO Peliculas (id_director, titulo, sinopsis, poster, anio, estado_peticion, tipo_proyeccion, fecha_aceptado) 
+                VALUES (?, ?, ?, ?, ?, 'p', NULL, NULL)";
+        $stmt = $this->pdo->prepare($sql);
+        return $stmt->execute([$id_director, $titulo, $sinopsis, $poster, $anio]);
     }
 
-    public function getPeliculasByDirector(int $id_director): array {
-        global $pdo;
-        $stmt = $pdo->prepare("
-            SELECT p.*, 
-                   COALESCE(f.acumulado, 0) as acumulado,
-                   f.meta,
-                   COUNT(s.id_sesion) as total_sesiones
-            FROM Peliculas p
-            LEFT JOIN Funding f ON f.id_pelicula = p.id_pelicula
-            LEFT JOIN Sesiones s ON s.id_pelicula = p.id_pelicula
-            WHERE p.id_director = ? AND p.estado = TRUE
-            GROUP BY p.id_pelicula
-        ");
+    public function obtenerPorDirector($id_director) {
+        $stmt = $this->pdo->prepare("SELECT * FROM Peliculas WHERE id_director = ? AND estado = 1");
         $stmt->execute([$id_director]);
         return $stmt->fetchAll();
     }
 
-    public function getPeliculaConDetalle(int $id_pelicula) {
-        global $pdo;
-        $stmt = $pdo->prepare("
-            SELECT p.*, 
-                   COALESCE(f.acumulado, 0) as acumulado,
-                   f.meta,
-                   f.estado_funding,
-                   COUNT(s.id_sesion) as total_sesiones,
-                   SUM(CASE WHEN es.id_espectador_sesion IS NOT NULL THEN 1 ELSE 0 END) as boletos_vendidos
-            FROM Peliculas p
-            LEFT JOIN Funding f ON f.id_pelicula = p.id_pelicula
-            LEFT JOIN Sesiones s ON s.id_pelicula = p.id_pelicula
-            LEFT JOIN EspectadorSesion es ON es.id_sesion = s.id_sesion
-            WHERE p.id_pelicula = ?
-            GROUP BY p.id_pelicula
-        ");
+    public function obtenerReporte($id_pelicula) {
+        $res = ['sesion' => null, 'funding' => null];
+        $stmt = $this->pdo->prepare("SELECT s.capacidad, (SELECT COUNT(*) FROM EspectadorSesion es WHERE es.id_sesion = ses.id_sesion) as ocupados 
+                                    FROM Sesiones ses JOIN Salas s ON ses.id_sala = s.id_sala WHERE ses.id_pelicula = ?");
         $stmt->execute([$id_pelicula]);
-        return $stmt->fetch();
+        $res['sesion'] = $stmt->fetch();
+
+        $stmt = $this->pdo->prepare("SELECT meta, acumulado FROM Funding WHERE id_pelicula = ?");
+        $stmt->execute([$id_pelicula]);
+        $res['funding'] = $stmt->fetch();
+        return $res;
     }
 }
